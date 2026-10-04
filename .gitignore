@@ -1,0 +1,22 @@
+# 安装脚本生成的宿主清单（含本机绝对路径与扩展 ID，不应提交）
+native-host/cc.pclc.download_bridge.json
+
+# 编译产物
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# PCL 侧源码（补丁仓库不携带完整源码）
+src/
+upstream/
+
+# 日志与临时文件
+*.log
+*.tmp
+_patchgen/
+
+# 系统
+Thumbs.db
+desktop.ini

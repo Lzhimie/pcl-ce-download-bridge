@@ -1,0 +1,46 @@
+PCL CE 浏览器下载接管 (PCL CE Download Bridge)
+Copyright 2026 PCL CE Download Bridge contributors
+
+---
+
+本仓库包含两部分内容，授权与来源分别如下：
+
+## 一、浏览器扩展与原生宿主（extension/、native-host/、docs/）
+
+原创作品，采用 Apache License 2.0 授权。
+
+## 二、PCL CE 的修改（pcl-patch/）
+
+本部分是对下列作品的修改（Derivative Work）：
+
+    Plain Craft Launcher Community Edition (PCL CE)
+    https://github.com/PCL-Community/PCL-CE
+    Copyright (c) PCL Community
+    采用 Apache License 2.0 授权
+
+修改基于以下具体版本：
+
+    标签:   v2.15.0
+    提交:   12bb0ea2517de810c4d6da3daf63239c8a9d9bdf
+    获取:   https://codeload.github.com/PCL-Community/PCL-CE/zip/refs/tags/v2.15.0
+
+### 已声明的修改内容（Apache License 2.0 第 4(b) 条）
+
+共改动 6 个文件：新增 2 个，修改 4 个，删除 0 个。
+
+新增：
+  1. PCL.Core/App/CustomDownloadState.cs
+  2. PCL.Core/App/Essentials/RpcDownloadExtension.cs
+
+修改：
+  3. Plain Craft Launcher 2/Application.xaml.cs
+  4. Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml
+  5. Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml.cs
+  6. Plain Craft Launcher 2/Pages/PageTools/PageToolsTest.xaml.cs
+
+具体差异见 pcl-patch/pcl-download-rpc.patch。
+
+### 未修改的内容
+
+本仓库不重新分发 PCL CE 的完整源码或编译产物，仅提供针对上述版本的补丁与改动文件。
+使用方需自行从官方渠道获取上游源码。
