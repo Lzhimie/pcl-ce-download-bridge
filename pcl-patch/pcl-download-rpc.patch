@@ -1,0 +1,733 @@
+﻿diff --git a/PCL.Core/App/CustomDownloadState.cs b/PCL.Core/App/CustomDownloadState.cs
+new file mode 100644
+index 0000000..8efef88
+--- /dev/null
++++ b/PCL.Core/App/CustomDownloadState.cs
+@@ -0,0 +1,32 @@
++namespace PCL.Core.App;
++
++/// <summary>
++///     「下载自定义文件」的共享输入内容，被主页右侧卡片与「工具 → 百宝箱」共用，
++///     同时也是「浏览器接管」把链接送进 PCL 的落点。
++///
++///     放在 PCL.Core 是为了让三方都能直接访问，无需反射：
++///       · PCL.Core 里的 download RPC（PCL 已在运行时）
++///       · 启动参数解析（PCL 冷启动时，见 Application.ApplyDownloadStartupArguments）
++///       · 两个 UI 卡片
++///
++///     刻意只存内存不持久化，避免下次启动残留旧链接；
++///     保存目录的持久化由 States.Tool.DownloadFolder 负责。
++/// </summary>
++public static class CustomDownloadState
++{
++    /// <summary>下载地址。</summary>
++    public static string Url { get; set; } = "";
++
++    /// <summary>文件名。</summary>
++    public static string FileName { get; set; } = "";
++
++    /// <summary>保存目录；为空表示由页面按 PCL 记住的位置填充。</summary>
++    public static string Folder { get; set; } = "";
++
++    /// <summary>下载启动后清空地址与文件名（与百宝箱原行为一致）。</summary>
++    public static void ClearRequest()
++    {
++        Url = "";
++        FileName = "";
++    }
++}
+diff --git a/PCL.Core/App/Essentials/RpcDownloadExtension.cs b/PCL.Core/App/Essentials/RpcDownloadExtension.cs
+new file mode 100644
+index 0000000..e0396d9
+--- /dev/null
++++ b/PCL.Core/App/Essentials/RpcDownloadExtension.cs
+@@ -0,0 +1,284 @@
++using System;
++using System.Linq;
++using System.Reflection;
++using System.Text.Json;
++using System.Threading;
++using System.Windows.Controls;
++
++namespace PCL.Core.App.Essentials;
++
++/// <summary>
++/// 供外部程序（如浏览器扩展）调用的下载 RPC。
++///
++/// 行为（严格遵守）：
++///   1. 只在被调用时把界面切到【主页】（启动页）；已在主页时不做任何切换；
++///   2. 只把【下载地址】【文件名】填进主页右侧的下载卡片（给了 folder 才填【保存到】）；
++///   3. **绝不点击“开始下载”，绝不发起下载** —— 由用户自己确认后操作；
++///   4. 桌面正常启动 PCL 时本代码不参与，主页行为不受影响。
++///
++/// 主页卡片与「工具 → 百宝箱」共享输入内容（见 PCL.CustomDownloadState），
++/// 这里操作真实控件会触发其 TextChanged，同步逻辑自动生效。
++///
++/// 用法：向命名管道 PCLCE_RPC@PID 发送
++///   REQ download
++///   {"url":"...","filename":"..."}
++/// </summary>
++public static class RpcDownloadExtension
++{
++    private const BindingFlags Inst = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
++    private const BindingFlags Stat = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
++
++    private static MethodInfo? _pageChange;
++    private static MethodInfo? _buttonRefresh;
++
++    private static Type? FindType(string fullName)
++    {
++        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
++        {
++            try
++            {
++                var t = asm.GetType(fullName, false);
++                if (t != null) return t;
++            }
++            catch { }
++        }
++        return null;
++    }
++
++    private static object? StaticField(string typeName, string fieldName)
++    {
++        var t = FindType(typeName);
++        if (t == null) return null;
++        try { return t.GetField(fieldName, Stat)?.GetValue(null); } catch { return null; }
++    }
++
++    /// <summary>在 UI 线程执行，并把异常带回来。</summary>
++    private static void RunOnUi(object frm, Action act)
++    {
++        var dispatcher = frm.GetType().GetProperty("Dispatcher")?.GetValue(frm);
++        if (dispatcher == null) throw new InvalidOperationException("拿不到 Dispatcher");
++        var invoke = dispatcher.GetType().GetMethods()
++            .FirstOrDefault(m => m.Name == "Invoke"
++                                && m.GetParameters().Length == 2
++                                && m.GetParameters()[0].ParameterType == typeof(Delegate)
++                                && m.GetParameters()[1].ParameterType == typeof(object[]));
++        if (invoke == null) throw new InvalidOperationException("找不到 Dispatcher.Invoke(Delegate, object[])");
++        invoke.Invoke(dispatcher, new object[] { act, Array.Empty<object>() });
++    }
++
++    /// <summary>把界面切到【主页】。已在主页时 PCL 自己会忽略。必须在 UI 线程调用。</summary>
++    private static void SwitchToLaunchPage()
++    {
++        var frmMain = StaticField("PCL.ModMain", "frmMain");
++        if (frmMain == null) throw new InvalidOperationException("主窗口尚未创建");
++
++        var pageType = FindType("PCL.FormMain+PageType");
++        var subType = FindType("PCL.FormMain+PageSubType");
++        var stackType = FindType("PCL.FormMain+PageStackData");
++        if (pageType == null || subType == null || stackType == null)
++            throw new InvalidOperationException("找不到 FormMain 的页面类型");
++
++        _pageChange ??= frmMain.GetType().GetMethods()
++            .FirstOrDefault(m => m.Name == "PageChange" && m.GetParameters().Length == 2);
++        if (_pageChange == null) throw new InvalidOperationException("找不到 FormMain.PageChange");
++
++        var launch = Enum.Parse(pageType, "Launch", true);
++        var subDefault = Enum.Parse(subType, "Default", true);
++        var stack = Activator.CreateInstance(stackType)!;
++        var pageField = stackType.GetField("page", Inst);
++        if (pageField == null) throw new InvalidOperationException("找不到 PageStackData.page");
++        pageField.SetValue(stack, launch);
++        _pageChange.Invoke(frmMain, new[] { stack, subDefault });
++    }
++
++    /// <summary>填主页下载卡片。必须在 UI 线程调用；返回填了几个字段。</summary>
++    private static int FillLaunchCard(string url, string filename, string folder)
++    {
++        var page = StaticField("PCL.ModMain", "frmLaunchRight");
++        if (page == null) throw new InvalidOperationException("主页尚未创建");
++
++        TextBox? Box(string name) => page.GetType().GetField(name, Inst)?.GetValue(page) as TextBox;
++
++        var urlBox = Box("LaunchTextDownloadUrl");
++        var nameBox = Box("LaunchTextDownloadName");
++        var folderBox = Box("LaunchTextDownloadFolder");
++        if (urlBox == null || nameBox == null)
++            throw new InvalidOperationException("主页下载卡片尚未创建");
++
++        var filled = 0;
++        // 顺序：先地址（会顺带按地址推一个文件名），再文件名覆盖，最后目录
++        if (!string.IsNullOrWhiteSpace(url)) { urlBox.Text = url; filled++; }
++        if (!string.IsNullOrWhiteSpace(filename)) { nameBox.Text = filename; filled++; }
++        // 保存到：只有明确给了才覆盖，否则保留 PCL 自己记住的合法目录
++        if (folderBox != null && !string.IsNullOrWhiteSpace(folder))
++        {
++            var f = folder.Replace('/', '\\');
++            if (!f.EndsWith('\\')) f += '\\';
++            folderBox.Text = f;
++            filled++;
++        }
++
++        // 触发校验，让「开始下载」按钮按校验结果启用/禁用
++        foreach (var b in new[] { urlBox, nameBox, folderBox })
++        {
++            if (b == null) continue;
++            try { b.GetType().GetMethod("Validate", Inst)?.Invoke(b, null); } catch { }
++        }
++        _buttonRefresh ??= page.GetType().GetMethod("LaunchDownloadButtonRefresh", Inst);
++        try { _buttonRefresh?.Invoke(page, null); } catch { }
++
++        return filled;
++    }
++
++    /// <summary>把 PCL 主窗口顶到最前。</summary>
++    /// <remarks>
++    /// 后台进程直接 SetForegroundWindow 通常会被 Windows 拒绝（只会闪烁任务栏图标），
++    /// 所以这里用经典的 AttachThreadInput 技巧：先把本线程输入队列挂到当前前台线程上，
++    /// 再 BringWindowToTop + SetForegroundWindow，最后解除挂接。
++    /// 必须在 UI 线程调用。
++    /// </remarks>
++    public static void BringToFront()
++    {
++        var win = StaticField("PCL.ModMain", "frmMain") as System.Windows.Window;
++        if (win == null) return;
++
++        try
++        {
++            if (win.WindowState == System.Windows.WindowState.Minimized)
++                win.WindowState = System.Windows.WindowState.Normal;
++
++            var hwnd = new System.Windows.Interop.WindowInteropHelper(win).Handle;
++            if (hwnd == IntPtr.Zero) return;
++
++            var foreground = Native.GetForegroundWindow();
++            var currentThread = Native.GetCurrentThreadId();
++            var foregroundThread = foreground == IntPtr.Zero
++                ? 0u
++                : Native.GetWindowThreadProcessId(foreground, IntPtr.Zero);
++
++            var attached = foregroundThread != 0 && foregroundThread != currentThread &&
++                           Native.AttachThreadInput(currentThread, foregroundThread, true);
++            try
++            {
++                Native.ShowWindow(hwnd, Native.SwRestore);
++                Native.BringWindowToTop(hwnd);
++                Native.SetForegroundWindow(hwnd);
++            }
++            finally
++            {
++                if (attached) Native.AttachThreadInput(currentThread, foregroundThread, false);
++            }
++
++            // 兜底：Topmost 抖动是常用的“强制置前”手法
++            var wasTopmost = win.Topmost;
++            win.Topmost = true;
++            win.Topmost = wasTopmost;
++            win.Activate();
++        }
++        catch { }
++    }
++
++    private static class Native
++    {
++        public const int SwRestore = 9;
++
++        [System.Runtime.InteropServices.DllImport("user32.dll")]
++        public static extern IntPtr GetForegroundWindow();
++
++        [System.Runtime.InteropServices.DllImport("user32.dll")]
++        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
++
++        [System.Runtime.InteropServices.DllImport("user32.dll")]
++        public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
++
++        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
++        public static extern uint GetCurrentThreadId();
++
++        [System.Runtime.InteropServices.DllImport("user32.dll")]
++        public static extern bool SetForegroundWindow(IntPtr hWnd);
++
++        [System.Runtime.InteropServices.DllImport("user32.dll")]
++        public static extern bool BringWindowToTop(IntPtr hWnd);
++
++        [System.Runtime.InteropServices.DllImport("user32.dll")]
++        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
++    }
++
++    // 注意：不注册 "activate" —— PCL 自带一个同名的（RpcService._FunctionMap），会遮蔽这里。
++    // 内置那个只做 Topmost 抖动 + Activate()，后台调用时会被 Windows 拒绝；
++    // 真正管用的是上面 BringToFront 里的 AttachThreadInput 技巧。
++    // 宿主侧已改为「看 GetForegroundWindow 验证是否真的置顶，不生效再走 Win32 兜底」。
++
++    [RegisterRpc("download")]
++    public static RpcResponse OnRpcDownload(string? argument, string? content, bool indent)
++    {
++        try
++        {
++            if (string.IsNullOrWhiteSpace(content))
++                return RpcResponse.Err("需要 JSON 内容：{\"url\":\"...\",\"filename\":\"...\"}");
++
++            string url, filename, folder;
++            try
++            {
++                using var doc = JsonDocument.Parse(content);
++                var root = doc.RootElement;
++                url = root.TryGetProperty("url", out var u) ? (u.GetString() ?? "") : "";
++                filename = root.TryGetProperty("filename", out var f) ? (f.GetString() ?? "") : "";
++                folder = root.TryGetProperty("folder", out var d) ? (d.GetString() ?? "") : "";
++            }
++            catch (JsonException ex)
++            {
++                return RpcResponse.Err("JSON 解析失败：" + ex.Message);
++            }
++
++            if (string.IsNullOrWhiteSpace(url)) return RpcResponse.Err("url 不能为空");
++            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
++                !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
++                !url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase))
++                return RpcResponse.Err("只支持 http/https/ftp 地址");
++
++            // 先写共享状态：即使主窗口/卡片还没创建，卡片稍后创建时也会读到它，
++            // 从而做到「窗口一出现就是填好的」。也是冷启动参数的落点。
++            CustomDownloadState.Url = url;
++            CustomDownloadState.FileName = filename;
++            if (!string.IsNullOrWhiteSpace(folder)) CustomDownloadState.Folder = folder;
++
++            var frmMain = StaticField("PCL.ModMain", "frmMain");
++            if (frmMain == null)
++                return RpcResponse.Success(RpcResponseType.Text,
++                    $"已交给 PCL 预填：{filename}（窗口创建后即显示）");
++
++            string? lastError = null;
++            for (var i = 0; i < 60; i++)
++            {
++                try
++                {
++                    var filled = 0;
++                    RunOnUi(frmMain, () =>
++                    {
++                        SwitchToLaunchPage();
++                        filled = FillLaunchCard(url, filename, folder);
++                        // 用户点了下载，就把后台的 PCL 顶到最前，让填好的卡片直接可见
++                        if (filled >= 2) BringToFront();
++                    });
++                    if (filled >= 2)
++                        return RpcResponse.Success(RpcResponseType.Text,
++                            $"已在 PCL 主页填好：{filename}（等待你点击开始下载）");
++                    lastError = "只填入了 " + filled + " 个字段";
++                }
++                catch (Exception ex)
++                {
++                    lastError = ex.Message;
++                }
++                Thread.Sleep(250);
++            }
++
++            return RpcResponse.Err("填写超时：" + (lastError ?? "未知"));
++        }
++        catch (Exception ex)
++        {
++            // 兜底：绝不把异常抛回 PCL 主流程，避免启动器崩溃
++            return RpcResponse.Err("download RPC 内部错误：" + ex.Message);
++        }
++    }
++}
+diff --git a/Plain Craft Launcher 2/Application.xaml.cs b/Plain Craft Launcher 2/Application.xaml.cs
+index 59ae831..c1db24c 100644
+--- a/Plain Craft Launcher 2/Application.xaml.cs	
++++ b/Plain Craft Launcher 2/Application.xaml.cs	
+@@ -55,6 +55,11 @@ public partial class Application
+                         Environment.Exit((int)ModBase.ProcessReturnValues.Fail);
+                     }
+ 
++            // 浏览器下载接管：把链接随启动参数一起带进来。
++            // 这段运行在主窗口创建之前，所以主页卡片一出现就已经是填好的，
++            // 不会出现「窗口先弹出来、过两秒才填上」的割裂感。
++            ApplyDownloadStartupArguments(args);
++
+             // 初始化文件结构
+             Directory.CreateDirectory(ModBase.exePath + @"PCL\Pictures");
+             Directory.CreateDirectory(ModBase.exePath + @"PCL\Musics");
+@@ -118,6 +123,37 @@ public partial class Application
+         }
+     }
+ 
++    /// <summary>
++    ///     解析浏览器接管传来的下载参数，写入共享状态。
++    ///     形如：--download &lt;url&gt; --filename &lt;name&gt; [--folder &lt;dir&gt;]
++    /// </summary>
++    private static void ApplyDownloadStartupArguments(string[] args)
++    {
++        string? url = null, name = null, folder = null;
++        for (var i = 0; i < args.Length - 1; i++)
++        {
++            switch (args[i])
++            {
++                case "--download":
++                    url = args[i + 1].Trim('"');
++                    break;
++                case "--filename":
++                    name = args[i + 1].Trim('"');
++                    break;
++                case "--folder":
++                    folder = args[i + 1].Trim('"');
++                    break;
++            }
++        }
++
++        if (string.IsNullOrWhiteSpace(url)) return;
++
++        CustomDownloadState.Url = url;
++        if (!string.IsNullOrWhiteSpace(name)) CustomDownloadState.FileName = name;
++        if (!string.IsNullOrWhiteSpace(folder)) CustomDownloadState.Folder = folder;
++        ModBase.Log($"[Start] 收到下载接管参数，将在主页预填：{name}");
++    }
++
+     // 检测异常环境
+     private static void _ShowEnvironmentWarning()
+     {
+diff --git a/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml b/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml
+index 0b14dfb..aae7bdd 100644
+--- a/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml	
++++ b/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml	
+@@ -1,9 +1,91 @@
+ <local:MyPageRight x:Class="PCL.PageLaunchRight"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+-                   xmlns:local="clr-namespace:PCL"> <!-- 不知道为啥只有这个文件不能在 XAML 设置 PanScroll -->
++                   xmlns:local="clr-namespace:PCL"
++                   xmlns:val="https://ce.pclc.cc/core/utils/validate"> <!-- 不知道为啥只有这个文件不能在 XAML 设置 PanScroll -->
+     <local:MyScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" x:Name="PanBack">
+         <StackPanel Name="PanMain" Margin="25,25,25,10" Grid.IsSharedSizeScope="True">
++            <!-- 自定义下载：与「工具 → 百宝箱」同一份数据，双向同步（见 CustomDownloadState） -->
++            <local:MyCard Margin="0,0,0,15" Title="{DynamicResource Tools.Test.CustomDownload.Title}"
++                          x:Name="PanCustomDownload">
++                <StackPanel Orientation="Vertical" Margin="25,40,25,20">
++                    <TextBlock Text="{DynamicResource Tools.Test.CustomDownload.Description}"
++                               TextWrapping="Wrap" />
++                    <Grid Margin="0,10,0,0">
++                        <Grid.Resources>
++                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource BasedOnTextBlock}">
++                                <Setter Property="VerticalAlignment" Value="Center" />
++                                <Setter Property="Margin" Value="0,0,25,0" />
++                            </Style>
++                        </Grid.Resources>
++                        <Grid.ColumnDefinitions>
++                            <ColumnDefinition Width="Auto" />
++                            <ColumnDefinition Width="*" />
++                            <ColumnDefinition Width="Auto" />
++                        </Grid.ColumnDefinitions>
++                        <Grid.RowDefinitions>
++                            <RowDefinition Height="Auto" />
++                            <RowDefinition Height="Auto" />
++                            <RowDefinition Height="Auto" />
++                            <RowDefinition />
++                        </Grid.RowDefinitions>
++
++                        <TextBlock Grid.Column="0" Grid.Row="0" Text="{DynamicResource Tools.Test.CustomDownload.Url}" />
++                        <local:MyTextBox x:Name="LaunchTextDownloadUrl" Grid.Column="1" Grid.Row="0"
++                                         Grid.ColumnSpan="2"
++                                         TextChanged="LaunchDownloadUrl_TextChanged"
++                                         ValidatedTextChanged="LaunchDownloadUrl_ValidateChanged">
++                            <local:MyTextBox.ValidateRules>
++                                <val:HttpAndUncValidator />
++                            </local:MyTextBox.ValidateRules>
++                        </local:MyTextBox>
++
++                        <TextBlock Grid.Column="0" Grid.Row="2"
++                                   Text="{DynamicResource Tools.Test.CustomDownload.SaveTo}" />
++                        <local:MyTextBox x:Name="LaunchTextDownloadFolder" Grid.Column="1" Grid.Row="2"
++                                         Margin="0,10"
++                                         TextChanged="LaunchDownloadFolder_TextChanged"
++                                         ValidatedTextChanged="LaunchDownloadFolder_OnValidatedTextChanged">
++                            <local:MyTextBox.ValidateRules>
++                                <val:FolderPathValidator />
++                            </local:MyTextBox.ValidateRules>
++                        </local:MyTextBox>
++                        <local:MyTextButton Grid.Column="2" Grid.Row="2" Margin="10,0,5,0"
++                                            VerticalAlignment="Center"
++                                            Text="{DynamicResource Tools.Test.CustomDownload.Select}"
++                                            Click="LaunchDownloadSelectFolder_Click" />
++
++                        <TextBlock Grid.Column="0" Grid.Row="3"
++                                   Text="{DynamicResource Tools.Test.CustomDownload.FileName}" />
++                        <local:MyTextBox x:Name="LaunchTextDownloadName" Grid.Column="1" Grid.Row="3"
++                                         Grid.ColumnSpan="2"
++                                         TextChanged="LaunchDownloadName_TextChanged"
++                                         ValidatedTextChanged="LaunchDownloadName_ValidateChanged">
++                            <local:MyTextBox.ValidateRules>
++                                <val:FileNameValidator />
++                            </local:MyTextBox.ValidateRules>
++                        </local:MyTextBox>
++                    </Grid>
++                    <Grid Margin="0,15,0,0">
++                        <Grid.RowDefinitions>
++                            <RowDefinition Height="35" />
++                        </Grid.RowDefinitions>
++                        <Grid.ColumnDefinitions>
++                            <ColumnDefinition />
++                            <ColumnDefinition />
++                        </Grid.ColumnDefinitions>
++                        <local:MyButton x:Name="LaunchBtnDownloadStart" Grid.Column="0" Width="140"
++                                        Text="{DynamicResource Tools.Test.CustomDownload.Start}"
++                                        ColorType="Highlight" Margin="0,0,15,0" HorizontalAlignment="Right"
++                                        Click="LaunchDownloadStart_Click" />
++                        <local:MyButton x:Name="LaunchBtnDownloadOpen" Grid.Column="1" Width="140"
++                                        Text="{DynamicResource Common.Action.OpenFolder}"
++                                        Margin="0,0,15,0" HorizontalAlignment="Left"
++                                        Click="LaunchDownloadOpen_Click" />
++                    </Grid>
++                </StackPanel>
++            </local:MyCard>
++
+             <StackPanel x:Name="PanCustom" />
+             <local:MyCard Margin="0,0,0,15" Title="{DynamicResource Launch.Right.CommunityHint.Title}" x:Name="PanHint">
+                 <local:MyIconButton LogoScale="1.1"
+diff --git a/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml.cs b/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml.cs
+index bb19cd5..a990cbe 100644
+--- a/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml.cs	
++++ b/Plain Craft Launcher 2/Pages/PageLaunch/PageLaunchRight.xaml.cs	
+@@ -1,8 +1,9 @@
+-﻿using System.IO;
++using System.IO;
+ using System.Globalization;
+ using System.Reflection;
+ using System.Windows;
+ using System.Windows.Controls;
++using System.Windows.Input;
+ using System.Windows.Media;
+ using System.Windows.Threading;
+ using PCL.Core.App;
+@@ -27,6 +28,9 @@ public partial class PageLaunchRight : IRefreshable
+         Loaded += (_, _) => Init();
+         Loaded += (_, _) => Refresh();
+         Unloaded += (_, _) => _DisposeHomepageLiveWatcher();
++        // 自定义下载卡片：首次加载与每次进入本页都从共享状态恢复（与「百宝箱」双向同步）
++        Loaded += (_, _) => LaunchDownloadSyncFromState();
++        PageEnter += LaunchDownloadSyncFromState;
+     }
+ 
+     private void Init()
+@@ -894,5 +898,162 @@ public partial class PageLaunchRight : IRefreshable
+         return null;
+     }
+ 
++    #region 自定义下载卡片（与「工具 → 百宝箱」共享同一份数据）
++
++    /// <summary>
++    ///     从共享状态恢复本卡片的输入内容，并刷新按钮可用性。
++    ///     首次加载与每次进入本页都会被调用，从而实现与百宝箱的双向同步。
++    /// </summary>
++    private void LaunchDownloadSyncFromState()
++    {
++        try
++        {
++            // 目录：优先用共享状态里已有的值，否则回落到 PCL 自己记住的位置
++            if (!string.IsNullOrEmpty(CustomDownloadState.Folder))
++            {
++                if (LaunchTextDownloadFolder.Text != CustomDownloadState.Folder)
++                    LaunchTextDownloadFolder.Text = CustomDownloadState.Folder;
++            }
++            else
++            {
++                var saved = States.Tool.DownloadFolder;
++                if (!string.IsNullOrEmpty(saved)) LaunchTextDownloadFolder.Text = saved;
++            }
++
++            LaunchTextDownloadFolder.Validate();
++            if (!string.IsNullOrEmpty(LaunchTextDownloadFolder.ValidateResult) ||
++                string.IsNullOrEmpty(LaunchTextDownloadFolder.Text))
++                LaunchTextDownloadFolder.Text = ModBase.exePath + @"PCL\MyDownload\";
++
++            // 先快照，避免下面写控件时（地址变化会自动推断文件名）把共享状态冲掉
++            var stateUrl = CustomDownloadState.Url;
++            var stateName = CustomDownloadState.FileName;
++
++            // 必须先写文件名再写地址：
++            // 地址的 TextChanged 在文件名为空时会自动从 URL 推断一个名字，
++            // 那会把正确的文件名和共享状态一起覆盖掉。
++            if (!string.IsNullOrEmpty(stateName) && LaunchTextDownloadName.Text != stateName)
++                LaunchTextDownloadName.Text = stateName;
++
++            if (!string.IsNullOrEmpty(stateUrl) && LaunchTextDownloadUrl.Text != stateUrl)
++                LaunchTextDownloadUrl.Text = stateUrl;
++
++            LaunchTextDownloadUrl.Validate();
++            LaunchTextDownloadName.Validate();
++            LaunchTextDownloadFolder.Validate();
++            LaunchDownloadButtonRefresh();
++        }
++        catch (Exception ex)
++        {
++            ModBase.Log(ex, "刷新主页自定义下载卡片失败");
++        }
++    }
++
++    private void LaunchDownloadButtonRefresh()
++    {
++        LaunchBtnDownloadStart.IsEnabled = string.IsNullOrEmpty(LaunchTextDownloadFolder.ValidateResult) &&
++                                           string.IsNullOrEmpty(LaunchTextDownloadUrl.ValidateResult) &&
++                                           string.IsNullOrEmpty(LaunchTextDownloadName.ValidateResult);
++        LaunchBtnDownloadOpen.IsEnabled = string.IsNullOrEmpty(LaunchTextDownloadFolder.ValidateResult);
++    }
++
++    private void LaunchDownloadUrl_TextChanged(object sender, TextChangedEventArgs e)
++    {
++        try
++        {
++            CustomDownloadState.Url = LaunchTextDownloadUrl.Text;
++            if (!string.IsNullOrEmpty(LaunchTextDownloadName.Text) ||
++                string.IsNullOrEmpty(LaunchTextDownloadUrl.Text)) return;
++            LaunchTextDownloadName.Text =
++                ModBase.GetFileNameFromPath(System.Net.WebUtility.UrlDecode(LaunchTextDownloadUrl.Text));
++            LaunchDownloadButtonRefresh();
++        }
++        catch
++        {
++        }
++    }
++
++    private void LaunchDownloadName_TextChanged(object sender, TextChangedEventArgs e)
++    {
++        CustomDownloadState.FileName = LaunchTextDownloadName.Text;
++    }
++
++    private void LaunchDownloadFolder_TextChanged(object sender, TextChangedEventArgs e)
++    {
++        CustomDownloadState.Folder = LaunchTextDownloadFolder.Text;
++    }
++
++    private void LaunchDownloadUrl_ValidateChanged(object sender, RoutedEventArgs e)
++    {
++        LaunchDownloadButtonRefresh();
++    }
++
++    private void LaunchDownloadName_ValidateChanged(object sender, RoutedEventArgs e)
++    {
++        LaunchDownloadButtonRefresh();
++    }
++
++    private void LaunchDownloadFolder_ValidateChanged(object sender, EventArgs e)
++    {
++        LaunchDownloadButtonRefresh();
++    }
++
++    private void LaunchDownloadFolder_OnValidatedTextChanged(object sender, RoutedEventArgs e)
++    {
++        // 与百宝箱同源：目录校验通过后写回 PCL 的持久化状态
++        States.Tool.DownloadFolder = LaunchTextDownloadFolder.Text;
++        CustomDownloadState.Folder = LaunchTextDownloadFolder.Text;
++        LaunchTextDownloadName.Validate();
++        LaunchDownloadButtonRefresh();
++    }
++
++    private void LaunchDownloadSelectFolder_Click(object sender, EventArgs e)
++    {
++        var text = SystemDialogs.SelectFolder();
++        if (!string.IsNullOrEmpty(text)) LaunchTextDownloadFolder.Text = text;
++    }
++
++    private void LaunchDownloadOpen_Click(object sender, MouseButtonEventArgs e)
++    {
++        try
++        {
++            var text = LaunchTextDownloadFolder.Text;
++            Directory.CreateDirectory(text);
++            Basics.OpenPath(text);
++        }
++        catch (Exception ex)
++        {
++            ModBase.Log(ex, "打开下载文件夹失败");
++        }
++    }
++
++    private void LaunchDownloadStart_Click(object sender, MouseButtonEventArgs e)
++    {
++        PageToolsTest.StartCustomDownload(LaunchTextDownloadUrl.Text, LaunchTextDownloadName.Text,
++            LaunchTextDownloadFolder.Text);
++
++        // 与百宝箱保持一致：启动后清空地址与文件名
++        LaunchTextDownloadUrl.Text = "";
++        LaunchTextDownloadUrl.Validate();
++        LaunchTextDownloadUrl.ForceShowAsSuccess();
++        LaunchTextDownloadName.Text = "";
++        LaunchTextDownloadName.Validate();
++        LaunchTextDownloadName.ForceShowAsSuccess();
++        CustomDownloadState.ClearRequest();
++        LaunchDownloadButtonRefresh();
++
++        // 跳去「任务管理」页看进度（与 PCL 自带的“下载中”按钮同一目标页）
++        try
++        {
++            ModMain.frmMain.PageChange(FormMain.PageType.TaskManager);
++        }
++        catch (Exception ex)
++        {
++            ModBase.Log(ex, "跳转到任务管理页失败");
++        }
++    }
++
++    #endregion
++
+     #endregion
+ }
+diff --git a/Plain Craft Launcher 2/Pages/PageTools/PageToolsTest.xaml.cs b/Plain Craft Launcher 2/Pages/PageTools/PageToolsTest.xaml.cs
+index cb0da10..2956682 100644
+--- a/Plain Craft Launcher 2/Pages/PageTools/PageToolsTest.xaml.cs	
++++ b/Plain Craft Launcher 2/Pages/PageTools/PageToolsTest.xaml.cs	
+@@ -1,4 +1,4 @@
+-﻿using System.Diagnostics;
++using System.Diagnostics;
+ using System.Drawing;
+ using System.Drawing.Drawing2D;
+ using System.Drawing.Imaging;
+@@ -37,6 +37,12 @@ public partial class PageToolsTest
+         BtnSelectSkin.Click += BtnSelectSkin_Click;
+         CmbHeadSize.SelectionChanged += CmbHeadSize_SelectionChanged;
+         Loaded += (_, _) => MeLoaded();
++        // 与主页右侧的下载卡片共享输入内容：改动即写回，进入页面时读回。
++        // 注意不能挂在 Loaded 上 —— 页面实例会被 PCL 缓存，Loaded 只在首次显示时触发一次。
++        TextDownloadUrl.TextChanged += (_, _) => CustomDownloadState.Url = TextDownloadUrl.Text;
++        TextDownloadName.TextChanged += (_, _) => CustomDownloadState.FileName = TextDownloadName.Text;
++        TextDownloadFolder.TextChanged += (_, _) => CustomDownloadState.Folder = TextDownloadFolder.Text;
++        PageEnter += SyncDownloadFromSharedState;
+         #if DEBUG
+         BtnCrash.Visibility = Visibility.Visible;
+         #endif
+@@ -58,6 +64,42 @@ public partial class PageToolsTest
+         StartButtonRefresh();
+     }
+ 
++    /// <summary>
++    ///     每次进入本页时，从共享状态恢复「自定义下载」的输入内容，
++    ///     实现与主页右侧卡片之间的双向同步。
++    /// </summary>
++    private void SyncDownloadFromSharedState()
++    {
++        try
++        {
++            // 先快照，避免下面写控件时（地址变化会自动推断文件名）把共享状态冲掉
++            var stateUrl = CustomDownloadState.Url;
++            var stateName = CustomDownloadState.FileName;
++
++            // 必须先写文件名再写地址：
++            // 地址的 TextChanged 在文件名为空时会自动从 URL 推断一个名字，
++            // 那会把正确的文件名和共享状态一起覆盖掉。
++            if (!string.IsNullOrEmpty(stateName) && TextDownloadName.Text != stateName)
++                TextDownloadName.Text = stateName;
++
++            if (!string.IsNullOrEmpty(stateUrl) && TextDownloadUrl.Text != stateUrl)
++                TextDownloadUrl.Text = stateUrl;
++
++            if (!string.IsNullOrEmpty(CustomDownloadState.Folder) &&
++                TextDownloadFolder.Text != CustomDownloadState.Folder)
++                TextDownloadFolder.Text = CustomDownloadState.Folder;
++
++            TextDownloadUrl.Validate();
++            TextDownloadName.Validate();
++            TextDownloadFolder.Validate();
++            StartButtonRefresh();
++        }
++        catch (Exception ex)
++        {
++            ModBase.Log(ex, "同步百宝箱自定义下载输入失败");
++        }
++    }
++
+     private void StartButtonRefresh()
+     {
+         BtnDownloadStart.IsEnabled = string.IsNullOrEmpty(TextDownloadFolder.ValidateResult) &&
