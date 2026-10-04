@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PCL CE 下载接管</title>
+  <link rel="stylesheet" href="dialog.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <img src="icons/48.png" alt="PCL" width="28" height="28" />
+      <div>
+        <h1>PCL CE 下载接管</h1>
+        <p class="sub">已拦截浏览器下载，确认后交给 PCL CE 高速下载</p>
+      </div>
+    </header>
+
+    <section class="field">
+      <label>下载地址</label>
+      <div class="row">
+        <input id="url" type="text" readonly />
+        <button id="openUrl" class="ghost" title="用浏览器直接打开该地址">打开</button>
+      </div>
+    </section>
+
+    <section class="field">
+      <label>文件名</label>
+      <input id="filename" type="text" />
+    </section>
+
+    <section class="field">
+      <label>保存到（默认 = PCL CE 的下载目录）</label>
+      <div class="row">
+        <input id="folder" type="text" placeholder="正在读取 PCL CE 默认目录…" />
+        <button id="browse" class="ghost" title="打开系统文件夹选择框">选择…</button>
+      </div>
+      <p class="hint" id="folderHint"></p>
+    </section>
+
+    <label class="check">
+      <input id="autoStart" type="checkbox" checked />
+      <span>自动唤起 PCL 并开始下载</span>
+    </label>
+
+    <div id="status" class="status"></div>
+
+    <footer>
+      <button id="cancel" class="ghost">取消</button>
+      <button id="browserFallback" class="ghost" style="display:none">用浏览器下载</button>
+      <button id="saveAs" class="ghost">选择保存路径…</button>
+      <button id="confirm" class="primary">开始下载</button>
+    </footer>
+
+    <p class="meta" id="meta"></p>
+  </div>
+  <script src="dialog.js"></script>
+</body>
+</html>

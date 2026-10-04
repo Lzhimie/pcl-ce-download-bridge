@@ -1,0 +1,40 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  background: linear-gradient(160deg, #1d2430 0%, #232c3a 55%, #26313f 100%);
+  color: #e8eef6;
+  font-size: 13px;
+}
+#app { padding: 18px 20px 14px; display: flex; flex-direction: column; height: 100%; }
+header { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+header img { border-radius: 6px; }
+h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+.sub { margin: 3px 0 0; font-size: 11.5px; color: #93a4b8; }
+.field { margin-bottom: 13px; }
+label { display: block; font-size: 12px; color: #9fb0c4; margin-bottom: 5px; }
+input[type=text] {
+  width: 100%; padding: 8px 10px; border-radius: 7px; font-size: 12.5px;
+  border: 1px solid #3a4658; background: #161d27; color: #e8eef6; outline: none;
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+input[type=text]:focus { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,.18); }
+input[readonly] { color: #9fb0c4; }
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; }
+.check { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; color: #c3d0e0; }
+.check input { width: 15px; height: 15px; accent-color: #4f8cff; }
+.hint { font-size: 11px; color: #7d8ea3; margin: 5px 0 0; }
+.status { min-height: 18px; font-size: 12px; color: #7fd18a; }
+.status.err { color: #ff8f8f; }
+footer { margin-top: auto; display: flex; gap: 8px; justify-content: flex-end; padding-top: 12px; }
+button {
+  border-radius: 7px; padding: 8px 16px; font-size: 12.5px; cursor: pointer;
+  border: 1px solid transparent; font-family: inherit; transition: .12s;
+}
+button.primary { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+button.primary:hover { background: #2f6fdc; }
+button.ghost { background: transparent; color: #c3d0e0; border-color: #3a4658; }
+button.ghost:hover { background: #232c3a; border-color: #4d5b70; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.meta { font-size: 10.5px; color: #64748b; margin: 8px 0 0; word-break: break-all; }

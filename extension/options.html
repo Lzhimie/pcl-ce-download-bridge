@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PCL CE 下载接管 · 设置</title>
+  <link rel="stylesheet" href="dialog.css" />
+  <style>
+    body { height: auto; }
+    #app { max-width: 620px; margin: 0 auto; height: auto; }
+    .card { background: #1b232e; border: 1px solid #2c3644; border-radius: 9px; padding: 14px 16px; margin-bottom: 14px; }
+    .card h2 { font-size: 13px; margin: 0 0 10px; color: #cfe0f5; font-weight: 600; }
+    .switch { display: flex; align-items: center; gap: 9px; margin: 8px 0; color: #c3d0e0; }
+    .switch input { width: 15px; height: 15px; accent-color: #4f8cff; }
+    .path { display: flex; gap: 8px; }
+    .path input { flex: 1; }
+    code { background: #121821; padding: 2px 5px; border-radius: 4px; font-size: 11.5px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <img src="icons/48.png" width="28" height="28" alt="PCL" />
+      <div>
+        <h1>PCL CE 下载接管 · 设置</h1>
+        <p class="sub">把浏览器的下载交给本机 PCL CE 启动器</p>
+      </div>
+    </header>
+
+    <div class="card">
+      <h2>接管行为</h2>
+      <label class="switch"><input id="enabled" type="checkbox" /><span>启用下载接管（关闭后浏览器恢复正常下载）</span></label>
+      <label class="switch"><input id="silent" type="checkbox" /><span><b>静默接管</b>：不要浏览器确认窗，点下载直接唤起 PCL</span></label>
+      <label class="switch"><input id="useSelectedFolder" type="checkbox" /><span>优先使用浏览器原定的保存目录（关闭则用 PCL 默认目录）</span></label>
+      <p class="hint">固定流程：网页点下载 → PCL 被唤起 → 下载地址和文件名已填好 → <b>由你在 PCL 里点“开始下载”</b>。</p>
+      <p class="hint">本扩展不会自动点击“开始下载”，该操作始终由你确认。</p>
+    </div>
+
+    <div class="card">
+      <h2>PCL CE 路径</h2>
+      <div class="path">
+        <input id="pclPath" type="text" placeholder="留空 = 自动检测正在运行/已安装的 PCL" />
+        <button id="save" class="ghost">保存</button>
+      </div>
+      <p class="hint">自动检测顺序：正在运行的 PCL → 扩展目录旁的 <code>PCL.exe</code> → 上次使用过的路径。</p>
+      <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+        <button id="test" class="ghost">测试原生宿主</button>
+        <button id="pick" class="ghost">保存并检测</button>
+        <button id="copyInstall" class="ghost">复制安装命令</button>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <p class="meta">
+      原生宿主安装：在本目录执行 <code>powershell -ExecutionPolicy Bypass -File install-native-host.ps1</code>
+    </p>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PCL CE 下载接管</title>
+  <link rel="stylesheet" href="dialog.css" />
+  <style>
+    body { width: 380px; height: auto; }
+    #app { padding: 14px 16px 10px; height: auto; }
+    .card { background: #1b232e; border: 1px solid #2c3644; border-radius: 9px; padding: 11px 13px; margin-bottom: 11px; }
+    .card h2 { font-size: 12.5px; margin: 0 0 9px; color: #cfe0f5; font-weight: 600; }
+    .status-row { display: flex; align-items: center; gap: 7px; font-size: 12.5px; margin: 5px 0; color: #c3d0e0; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .dot.ok { background: #4ade80; }
+    .dot.bad { background: #f87171; }
+    .dot.idle { background: #64748b; }
+    .path-row { display: flex; gap: 6px; }
+    .path-row input { flex: 1; font-size: 11.5px; }
+    .btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    button { padding: 6px 11px; font-size: 12px; }
+    .switch { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: #c3d0e0; font-size: 12.5px; }
+    .switch input { width: 14px; height: 14px; accent-color: #4f8cff; }
+    #status { font-size: 11.5px; min-height: 16px; color: #7fd18a; margin: 4px 0 0; }
+    #status.err { color: #ff8f8f; }
+    .meta { font-size: 10.5px; color: #64748b; margin: 6px 0 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header style="margin-bottom:12px">
+      <img src="icons/48.png" width="26" height="26" alt="PCL" />
+      <div>
+        <h1 style="font-size:14px">PCL CE 下载接管</h1>
+        <p class="sub">把浏览器下载交给 PCL CE</p>
+      </div>
+    </header>
+
+    <div class="card">
+      <h2>状态</h2>
+      <div class="status-row"><span class="dot idle" id="dotHost"></span><span id="txtHost">正在检查原生宿主…</span></div>
+      <div class="status-row"><span class="dot idle" id="dotPcl"></span><span id="txtPcl">正在检查 PCL…</span></div>
+    </div>
+
+    <div class="card">
+      <h2>PCL CE 路径</h2>
+      <div class="path-row">
+        <input id="pclPath" type="text" placeholder="留空 = 自动探测" />
+        <button id="browse" class="ghost" title="选择 PCL 所在文件夹">选择…</button>
+      </div>
+      <div class="btns">
+        <button id="save" class="primary">保存路径</button>
+        <button id="detect" class="ghost">自动探测</button>
+      </div>
+      <p class="hint" id="pathHint">填 Plain Craft Launcher 2.exe 的完整路径；也可点「选择…」挑文件夹。</p>
+    </div>
+
+    <div class="card">
+      <h2>接管开关</h2>
+      <label class="switch"><input id="enabled" type="checkbox" /><span>启用下载接管</span></label>
+      <label class="switch"><input id="useSelectedFolder" type="checkbox" /><span>用浏览器原定保存目录</span></label>
+    </div>
+
+    <div id="status"></div>
+    <p class="meta"><a href="#" id="more" style="color:#7aa7ff">更多设置</a></p>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
