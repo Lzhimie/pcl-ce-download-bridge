@@ -42,6 +42,15 @@ git apply /path/to/pcl-download-rpc.patch
 
 把 `files/` 下的 6 个文件按相同相对路径覆盖到源码树（其中 2 个是新增文件）。
 
+> **关于行尾符**：补丁本身是 LF。
+> 上游 `.gitattributes` 含有 `* text=auto`，因此在 Windows 上 `git apply` 写出的文件会是 CRLF（本机习惯），
+> 属正常现象，**代码内容完全相同**，不影响编译。
+> 若你的环境提示不匹配，可加 `--ignore-whitespace`：
+>
+> ```bash
+> git apply --ignore-whitespace pcl-download-rpc.patch
+> ```
+
 ## 编译
 
 需要 **.NET 10 SDK**（仅运行时不够）：

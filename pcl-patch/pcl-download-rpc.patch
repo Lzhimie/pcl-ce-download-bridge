@@ -1,4 +1,4 @@
-﻿diff --git a/PCL.Core/App/CustomDownloadState.cs b/PCL.Core/App/CustomDownloadState.cs
+diff --git a/PCL.Core/App/CustomDownloadState.cs b/PCL.Core/App/CustomDownloadState.cs
 new file mode 100644
 index 0000000..8efef88
 --- /dev/null
