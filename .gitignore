@@ -20,3 +20,6 @@ _patchgen/
 # 系统
 Thumbs.db
 desktop.ini
+
+# 发布包（作为 GitHub Release 附件上传，不入库）
+dist/
