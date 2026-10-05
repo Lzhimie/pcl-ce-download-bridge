@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PCL CE 下载接管",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "拦截浏览器下载，交给你本机的 PCL CE 启动器用高速多线程引擎下载（类似 IDM 的接管体验）。",
   "minimum_chrome_version": "102",
   "permissions": [

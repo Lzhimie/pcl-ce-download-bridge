@@ -1,0 +1,123 @@
+========================================================
+ 安装说明（必读）
+========================================================
+
+本包包含两部分，缺一不可：
+
+  extension/      浏览器扩展
+  native-host/    原生消息宿主（浏览器与 PCL 之间的桥梁）
+
+另需配套的「PCL CE 修改版」—— 详见文末说明。
+
+
+第 1 步：加载浏览器扩展
+-------------------------
+  1. 打开 edge://extensions/   （Chrome 为 chrome://extensions/）
+  2. 打开左下角「开发人员模式」
+  3. 点「加载解压缩的扩展」，选择本包里的 extension 文件夹
+  4. 记下扩展卡片上显示的「扩展 ID」
+     （形如 abcdefghijklmnopabcdefghijklmnop 的 32 位字符串）
+
+
+第 2 步：安装原生宿主
+---------------------
+  在本包根目录打开 PowerShell，执行：
+
+    powershell -ExecutionPolicy Bypass -File ".\native-host\install-native-host.ps1"
+
+  提示：在文件资源管理器里打开 native-host 文件夹，
+       地址栏输入 powershell 回车，就会在正确目录弹出 PowerShell，
+       然后只敲 .\install-native-host.ps1 即可。
+
+  脚本会自动：识别扩展 ID → 写入原生消息清单 → 注册到 Edge / Chrome。
+  成功时会显示 [1/4] [3/4] [4/4] ... OK。
+
+  若自动识别失败，手动指定：
+
+    powershell -ExecutionPolicy Bypass -File ".\native-host\install-native-host.ps1" -ExtensionId <你的扩展ID>
+
+  卸载：
+
+    powershell -ExecutionPolicy Bypass -File ".\native-host\install-native-host.ps1" -Uninstall
+
+  提示：命令里请保留 native-host 后面那个反斜杠。
+
+
+第 3 步：指定 PCL 路径
+----------------------
+  点浏览器工具栏上的扩展图标，在「PCL CE 路径」里填入
+  Plain Craft Launcher 2.exe 的完整路径
+  （也可以只填它所在的文件夹，会自动解析），点「保存路径」。
+
+  下面状态应显示两个绿点：
+    ● 原生宿主正常
+    ● PCL 已找到 / PCL 正在运行
+
+
+第 4 步：验证
+-------------
+  在网页上找一个直链（GitHub Release 文件、网盘直链等）点下载。
+
+  预期：
+    · 浏览器没有自己的下载进度条（已被扩展接管）
+    · PCL 被唤起并置顶，停在主页
+    · 主页「下载自定义文件」卡片里，下载地址和文件名已经填好
+    · 「开始下载」按钮可点击，但没有被动过
+    · 扩展图标短暂显示蓝色 PCL 角标
+
+  完整验收清单：
+    1. 扩展已加载         edge://extensions/ 里有「PCL CE 下载接管」
+    2. 宿主已注册         扩展图标 → 两个灯全绿
+    3. 冷启动可用         完全关掉 PCL → 点下载 → 弹出时已填好
+    4. 热启动可用         PCL 开着 → 点下载 → 立刻填好并置顶
+    5. 桌面启动不受影响   双击 exe 正常打开，停在主页
+    6. 不会自动下载       接管后等 10 秒，磁盘上不应出现文件
+
+  注意：本扩展只填表，绝不自动开始下载，始终由你点「开始下载」。
+
+
+重要：需要配套的 PCL 修改版
+---------------------------
+  官方原版 PCL CE v2.15.0 没有 download RPC 函数，扩展只能退回较慢的
+  UI 自动化方式（约 11 秒，且会短暂占用你的鼠标）。
+
+  要获得完整体验（热启动 0.07 秒 / 冷启动窗口出现即填好 / 不碰鼠标 /
+  自动置顶 / 主页卡片），请使用配套的
+  「PCL-CE-v2.15.0-unofficial-download-bridge-win-x64.zip」。
+
+  快速辨别：修改版是框架依赖发布，exe 约 350 KB，整个目录约 96 个文件；
+            官方版是单文件发布，exe 约 21 MB。
+            本项目不认错版本的，请在扩展里手动指定路径。
+
+
+常见问题
+--------
+  ● 改了扩展代码没生效
+    → 必须去 edge://extensions/ 点「🔄 重新加载」，
+      否则浏览器跑的还是旧 Service Worker。
+
+  ● 报 Access to the specified native messaging host is forbidden
+    → 扩展 ID 与宿主清单不匹配，重跑第 2 步的安装脚本即可。
+
+  ● 报「找不到 PCL CE」或 PCL 状态灯是红的
+    → 在扩展图标里重新填 PCL 路径。机器上有多个 PCL 时尤其要手动指定。
+
+  ● 报 [Link] Failed to get announcement
+    → 与下载接管无关，是自编译版缺官方联机密钥所致。补丁已绕过它；
+      若仍出现说明你用的是官方版。自编译版的联机功能本来不可用。
+
+  排障日志：%LOCALAPPDATA%\PCLDownloadBridge\bridge.log
+
+
+开发须知
+--------
+  native-host 下的 .ps1 必须保存为 UTF-8 with BOM，
+  否则 PowerShell 5.1 会按 GBK 解析，中文注释会变成语法错误。
+  native-host.cmd 必须为纯 ASCII 无 BOM。
+  原生消息清单必须为无 BOM 的 UTF-8。
+
+
+许可
+----
+  Apache License 2.0，见 LICENSE。
+  PCL 侧改动的来源与修改声明见 NOTICE。
